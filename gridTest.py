@@ -15,24 +15,38 @@ DARKGRAY  = ( 40,  40,  40)
 BGCOLOR = DARKGRAY
 TXTCOLOR = BLUE
 
-GRID_SPACE = 280
+GRID_SPACE = 300
+
+x = 0
+y = 0
+heading = 0
+tgtTravel = 0
+tgtTurn = 0
+ultrasonic = 0
+
 
 def setX(newX):
-    x=newX
+    global x
+    x = newX
     
 def setY(newY):
-    y=newY
+    global y
+    y = newY
     
 def setHeading(newHeading):
-    x=newHeading
+    global heading
+    heading = newHeading
     
 def setTravel(newTravel):
-    tgtTravel=newTravel
+    global tgtTravel
+    tgtTravel = newTravel
     
 def setTurn(newTurn):
+    global tgtTurn
     tgtTurn = newTurn  
 
 def setUltrasonic(newUltrasonic):
+    global ultrasonic
     ultrasonic = newUltrasonic
     
 bot = mBot()
@@ -55,12 +69,7 @@ background.fill(BGCOLOR)
 #Opening USB serial port will reset the arduino - wait for it to reboot before continuing
 sleep(3)
 
-x=0
-y=0
-heading=0
-tgtTravel=0
-tgtTurn = 0
-ultrasonic = 0
+
 
 turn=0
 speed = 0
@@ -72,6 +81,7 @@ readoutFont = pygame.font.Font(None, 36)
 #Initialise position and heading
 bot.doGridX(123)
 bot.doGridY(456)
+bot.doGridHeading(90)
 
 while running:
 
@@ -88,34 +98,31 @@ while running:
 
                 tgtTravel = tgtTravel + GRID_SPACE
                 bot.doGridTravel(tgtTravel)
+                tgtTravel = bot.requestGridTravel()
                 
             if event.key == K_DOWN:
-                speed = -100
-                turn = 0
 
                 tgtTravel = tgtTravel - GRID_SPACE
                 if tgtTravel < 0:
                     tgtTravel = 0                
-                bot.doGridTravel(tgtTravel)                
+                bot.doGridTravel(tgtTravel)
+                tgtTravel = bot.requestGridTravel()
                 
             if event.key == K_RIGHT:
-                speed = 100
-                turn = 1
                 
                 tgtTurn = tgtTurn + 90
                 bot.doGridTurn(tgtTurn)
+                tgtTurn = bot.requestGridTurn()
                 
             if event.key == K_LEFT:
-                speed = 100
-                turn = -1
-               
+                
                 tgtTurn = tgtTurn - 90
                 bot.doGridTurn(tgtTurn)
+                tgtTurn = bot.requestGridTurn()
                         
         elif event.type == KEYUP:
-            speed = 0
-            turn = 0
-                
+            pass
+        
         elif event.type == MOUSEBUTTONDOWN:
             pass
         elif event.type == MOUSEBUTTONUP:
@@ -125,11 +132,12 @@ while running:
     bot.requestGridX(setX)
     bot.requestGridY(setY)
     bot.requestGridHeading(setHeading)
+    #bot.requestLineFollower(2, setHeading)
     #print "updating turn/travel..."            
     bot.requestGridTurn(setTurn)
     bot.requestGridTravel(setTravel)
     #print "updating ultrasonic..."            
-    ultrasonic = bot.requestUltrasonicSensor(3)
+    bot.requestUltrasonicSensor(3, setUltrasonic)
 
     displaySurf.blit(background, (0, 0))
 

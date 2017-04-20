@@ -140,7 +140,10 @@ class mBot():
         self.isParseStart = False
         self.exiting = False
         self.isParseStartIndex = 0
-        self.reqQueue = Queue.PriorityQueue()
+        # Wanted to use Priority queue to give priority to writes, but doesn't work -
+        # - Seems to prioritise on request itself instead of priority value
+        #self.reqQueue = Queue.PriorityQueue()
+        self.reqQueue = Queue.Queue()
         self.readInProgress = False
         self.writeInProgress = False
         self.reqStartTime = 0
@@ -255,28 +258,30 @@ class mBot():
                 self.isParseStart = False
 
                 #self.__printBuffer("Rxed Data:", self.buffer)
-                
-                position = self.isParseStartIndex+2
-                extID = self.buffer[position]
-                position += 1
-                type = self.buffer[position]
-                position += 1
-                # 1 byte 2 float 3 short 4 len+string 5 double
-                if type == 1:
-                    value = self.buffer[position]
-                if type == 2:
-                    value = self.readFloat(position)
-                    if(value < -255 or value > 1023):
-                        value = 0
-                if type == 3:
-                    value = self.readShort(position)
-                if type == 4:
-                    value = self.readString(position)
-                if type == 5:
-                    value = self.readDouble(position)
-                if(type <= 5):
-                    self.buffer = []
-                    self.currentRequest.device.updateValue(value)
+
+                if bufferLength > 4:
+                    position = self.isParseStartIndex + 2
+                    extID = self.buffer[position]
+                    position += 1
+                    valType = self.buffer[position]
+                    position += 1
+                    # 1 byte 2 float 3 short 4 len+string 5 double
+                    if valType == 1:
+                        value = self.buffer[position]
+                    if valType == 2:
+                        value = self.readFloat(position)
+                        if(value < -255 or value > 1023):
+                            value = 0
+                    if valType == 3:
+                        value = self.readShort(position)
+                    if valType == 4:
+                        value = self.readString(position)
+                    if valType == 5:
+                        value = self.readDouble(position)
+                    if valType <= 5:
+                        self.currentRequest.device.updateValue(value)
+                    else:
+                        print "Unknown data type " + str(valType)
                     
                 if self.writeInProgress:
                     self.currentRequest.device.flagWriteDone()
@@ -285,6 +290,8 @@ class mBot():
                 if self.readInProgress:
                     self.currentRequest.device.flagReadDone()
                     self.readInProgress = False
+
+                self.buffer = []
 
                 # Short delay after a request completes before we start the next one, so we don't
                 # overload arduino comms 
