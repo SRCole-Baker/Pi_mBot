@@ -1,5 +1,5 @@
 /*************************************************************************
-* File Name          : mbot_firmware.ino
+* File Name      111    : mbot_firmware.ino
 * Author             : Ander, Mark Yan
 * Updated            : Ander, Mark Yan
 * Version            : V06.01.106
@@ -130,6 +130,7 @@ uint8_t command_index = 0;
 #define GRID_HEADING 202
 #define GRID_TRAVEL 203
 #define GRID_TURN 204
+#define GRID_DATA 205
 
 #define GET 1
 #define RUN 2
@@ -337,22 +338,43 @@ void sendString(String s){
     writeSerial(s.charAt(i));
   }
 }
-//1 byte 2 float 3 short 4 len+string 5 double
-void sendFloat(float value){ 
-     writeSerial(2);
+//1 byte 2 float 3 short 4 len+string 5 double 6 len+byte array
+
+void sendFloatData(float value){ 
      val.floatVal = value;
      writeSerial(val.byteVal[0]);
      writeSerial(val.byteVal[1]);
      writeSerial(val.byteVal[2]);
      writeSerial(val.byteVal[3]);
 }
-void sendShort(double value){
-     writeSerial(3);
+void sendFloat(float value){ 
+     writeSerial(2);
+     sendFloatData(value);
+     /*
+     val.floatVal = value;
+     writeSerial(val.byteVal[0]);
+     writeSerial(val.byteVal[1]);
+     writeSerial(val.byteVal[2]);
+     writeSerial(val.byteVal[3]);
+     */
+}
+void sendShortData(double value){     
      valShort.shortVal = value;
      writeSerial(valShort.byteVal[0]);
      writeSerial(valShort.byteVal[1]);
      writeSerial(valShort.byteVal[2]);
      writeSerial(valShort.byteVal[3]);
+}
+void sendShort(double value){
+     writeSerial(3);
+     sendShortData(value);
+     /*
+     valShort.shortVal = value;
+     writeSerial(valShort.byteVal[0]);
+     writeSerial(valShort.byteVal[1]);
+     writeSerial(valShort.byteVal[2]);
+     writeSerial(valShort.byteVal[3]);
+     */
 }
 void sendDouble(double value){
      writeSerial(5);
@@ -610,6 +632,15 @@ float readUltrasonicSensor(int port) {
   return (float)us.distanceCm();
 }
 
+int readLineFollower(int port) {
+  if(generalDevice.getPort()!=port){
+    generalDevice.reset(port);
+    pinMode(generalDevice.pin1(),INPUT);
+    pinMode(generalDevice.pin2(),INPUT);
+  }
+  return generalDevice.dRead1()*2+generalDevice.dRead2();  
+}
+
 void readSensor(int device){
   /**************************************************
       ff    55      len idx action device port slot data a
@@ -622,14 +653,7 @@ void readSensor(int device){
   pin = port;
   switch(device){
     case  ULTRASONIC_SENSOR:{
-
       value = readUltrasonicSensor(port);
-      /*
-      if(us.getPort()!=port){
-        us.reset(port);
-      }
-      value = (float)us.distanceCm();
-      */
       writeHead();
       writeSerial(command_index);
       sendFloat(value);
@@ -701,12 +725,15 @@ void readSensor(int device){
     }
     break;
     case LINEFOLLOWER:{
+      /*
       if(generalDevice.getPort()!=port){
         generalDevice.reset(port);
           pinMode(generalDevice.pin1(),INPUT);
           pinMode(generalDevice.pin2(),INPUT);
       }
       value = generalDevice.dRead1()*2+generalDevice.dRead2();
+      */
+      value = readLineFollower(port);
       sendFloat(value);
     }
     break;
@@ -835,6 +862,14 @@ void readSensor(int device){
     case GRID_TURN:{
       sendShort(grid_turnAngle);
     }
+    case GRID_DATA:{
+      writeSerial(6);   // Data type 6 - arbitrary length byte array
+      writeSerial(10);  // Length of following data 
+      sendShortData(readLineFollower(2));
+      sendFloatData(readUltrasonicSensor(3));
+      sendShortData(grid_travelDist);
+      sendShortData(grid_turnAngle);
+    }
   }
 }
 
@@ -844,33 +879,14 @@ void LineFollow(int lineFollower, int travelSpeed, int courseCorrectSpeed)
   {
     case 0: // Both sensors on the line
       doMove(travelSpeed,travelSpeed);
-
-    /*
-      dc.reset(M1);
-      dc.run(travelSpeed * -1);
-      dc.reset(M2);
-      dc.run(travelSpeed);
-      */
       break;
 
     case 1: // Right sensor off the line - slow down left motor
       doMove(courseCorrectSpeed,travelSpeed);
-      /*
-      dc.reset(M1);
-      dc.run(courseCorrectSpeed * -1);          
-      dc.reset(M2);          
-      dc.run(travelSpeed);
-      */
       break;
 
     case 2: // Left sensor off the line - slow down right motor
       doMove(travelSpeed, courseCorrectSpeed);
-      /*
-      dc.reset(M1);
-      dc.run(travelSpeed * -1);
-      dc.reset(M2);          
-      dc.run(courseCorrectSpeed);
-      */
       break;
    }  
 }
@@ -942,7 +958,7 @@ void GridFollow()
 
       LineFollow(lineFollower, travelSpeed, courseCorrectSpeed);
       
-      if (millis() - grid_timer > 250)
+      if (millis() - grid_timer > 450)
       {
 
         grid_travelDist = grid_travelDist - gridSpace;

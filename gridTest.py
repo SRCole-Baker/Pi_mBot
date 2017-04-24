@@ -166,6 +166,8 @@ while running:
     displaySurf.blit(text, textpos)
 
     pygame.display.flip()
-            
+
+           
 pygame.display.quit()
 pygame.quit()
+bot.exit()

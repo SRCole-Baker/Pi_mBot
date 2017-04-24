@@ -143,7 +143,8 @@ class mBot():
         # Wanted to use Priority queue to give priority to writes, but doesn't work -
         # - Seems to prioritise on request itself instead of priority value
         #self.reqQueue = Queue.PriorityQueue()
-        self.reqQueue = Queue.Queue()
+        self.readReqQueue = Queue.Queue()
+        self.writeReqQueue = Queue.Queue()        
         self.readInProgress = False
         self.writeInProgress = False
         self.reqStartTime = 0
@@ -195,15 +196,16 @@ class mBot():
     def exit(self, signal, frame):
         self.exiting = True
         sys.exit(0)
-     
+
+    def exit(self):
+        self.exiting = True
+        sys.exit(0)
         
     def __commsThread(self):
-        while 1:
-              
+        while 1:                         
             if(self.exiting==True):
                 break
             if self.readInProgress or self.writeInProgress:
-                
                 if ((time.clock() - self.reqStartTime) > 0.1):
                     if self.readInProgress:
                         msg = "Read Request Timed Out "
@@ -215,21 +217,21 @@ class mBot():
                     self.readInProgress = False
                     self.writeInProgress = False                 
             else:
-                try:
-                    self.currentRequest = self.reqQueue.get()[1]
-
-                    if self.currentRequest.txBuffer[4] == 1:
+                try:                    
+                    self.currentRequest = self.writeReqQueue.get(False)
+                    self.writeInProgress = True
+                except:
+                    try:
+                        self.currentRequest = self.readReqQueue.get(False)
                         self.readInProgress = True
-                    if self.currentRequest.txBuffer[4] == 2:
-                        self.writeInProgress = True
-                        
+                    except:
+                        self.currentRequest = None
+
+                if self.currentRequest is not None:
                     self.comDevice.writePackage(self.currentRequest.txBuffer)
                     #self.__printBuffer("Tx Data:", self.currentRequest.txBuffer)           
     
                     self.reqStartTime = time.clock()
-                except Exception,ex:
-                    self.currentRequest = None
-            
             try:    
                 if self.comDevice.isOpen()==True:
                     n = self.comDevice.inWaiting()
@@ -327,7 +329,7 @@ class mBot():
             device.readPending = True
             device.callback = callback
             newReq = request(device, pack)
-            self.reqQueue.put((2, newReq))
+            self.readReqQueue.put(newReq)
 
         # If no callback function supplied, wait until read completes and
         # then return value
@@ -343,7 +345,7 @@ class mBot():
         if not device.writePending:
             device.writePending = True
             newReq = request(device, pack)
-            self.reqQueue.put((1, newReq))
+            self.writeReqQueue.put(newReq)
             
     def __printBuffer(self, msg, buf):        
         for i in range(0, len(buf)):
