@@ -168,6 +168,8 @@ class mBot():
         self.gridHeading = device("gridHeading")
         self.gridTravel = device("gridTravel")
         self.gridTurn = device("gridTurn")
+        self.gridStatus = device("gridStatus")
+        self.gridData = device("gridData")
         
         print "Done Init"        
         
@@ -421,6 +423,14 @@ class mBot():
     def requestGridTurn(self, callback = None):
         extID = 0
         return self.__queueReadRequest(self.gridTurn, bytearray([0xff, 0x55, 0x3, extID, 0x1, 0xcc]), callback)
+
+    def requestGridStatus(self, callback = None):
+        extID = 0
+        return self.__queueReadRequest(self.gridStatus, bytearray([0xff, 0x55, 0x3, extID, 0x1, 0xcd]), callback)
+
+    def requestGridData(self, callback = None):
+        extID = 0
+        return self.__queueReadRequest(self.gridData, bytearray([0xff, 0x55, 0x3, extID, 0x1, 0xce]), callback)    
 
     def doGridX(self, x):
         self.__queueWriteRequest(self.gridX, bytearray([0xff, 0x55, 0x5, 0x0, 0x2, 0xc8] + self.short2bytes(x)))

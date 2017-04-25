@@ -42,6 +42,7 @@ int grid_turnAngle;
 
 int grid_travelState;
 int grid_turnState;
+int grid_status;
 
 long unsigned int grid_timer;
 
@@ -130,7 +131,8 @@ uint8_t command_index = 0;
 #define GRID_HEADING 202
 #define GRID_TRAVEL 203
 #define GRID_TURN 204
-#define GRID_DATA 205
+#define GRID_STATUS 205
+#define GRID_DATA 206
 
 #define GET 1
 #define RUN 2
@@ -603,10 +605,12 @@ void runModule(int device){
     break;
     case GRID_TRAVEL:{
       grid_travelDist = readShort(6);
+      grid_status = grid_status | 0xFB;
     }
     break;
     case GRID_TURN:{
-      grid_turnAngle = readShort(6);      
+      grid_turnAngle = readShort(6);
+      grid_status = grid_status | 0xF3;   
     }
     break;
   }
@@ -725,14 +729,6 @@ void readSensor(int device){
     }
     break;
     case LINEFOLLOWER:{
-      /*
-      if(generalDevice.getPort()!=port){
-        generalDevice.reset(port);
-          pinMode(generalDevice.pin1(),INPUT);
-          pinMode(generalDevice.pin2(),INPUT);
-      }
-      value = generalDevice.dRead1()*2+generalDevice.dRead2();
-      */
       value = readLineFollower(port);
       sendFloat(value);
     }
@@ -862,10 +858,13 @@ void readSensor(int device){
     case GRID_TURN:{
       sendShort(grid_turnAngle);
     }
+    case GRID_STATUS:{
+      sendShort(grid_status);
+    }
     case GRID_DATA:{
       writeSerial(6);   // Data type 6 - arbitrary length byte array
       writeSerial(10);  // Length of following data 
-      sendShortData(readLineFollower(2));
+      sendShortData(readLineFollower(2) & grid_status * 4);
       sendFloatData(readUltrasonicSensor(3));
       sendShortData(grid_travelDist);
       sendShortData(grid_turnAngle);
@@ -893,6 +892,8 @@ void LineFollow(int lineFollower, int travelSpeed, int courseCorrectSpeed)
 
 void GridFollow()
 {
+
+  //!! TODO - implement grid_status
   int travelSpeed = 100;
   int courseCorrectSpeed = 50;
   int turnSpeed = 90;
@@ -923,6 +924,7 @@ void GridFollow()
       if (grid_turnState == 0 && grid_travelDist > 0)
       {
         doMove(travelSpeed, travelSpeed);
+        grid_status = grid_status & 0x01;
         grid_travelState = 1;
       }
       break;
@@ -977,8 +979,9 @@ void GridFollow()
     default:
       grid_travelState = 0;      
   }
-  if (grid_travelState !=0 && grid_travelDist == 0)
+  if (grid_travelState !=0 && (grid_travelDist == 0 || ultrasonic < 4))
   {
+    grid_status = grid_status & 0x02;
     grid_travelState = 0;
     doMove(0, 0);
   }
@@ -991,11 +994,13 @@ void GridFollow()
       {
         if (grid_turnAngle > 0)
         {
+          grid_status = grid_status & 0x04;
           grid_turnState = 1;
         }
         if (grid_turnAngle < 0)
         {
           grid_turnState = 3;
+          grid_status = grid_status & 0x04;
         }
       }
       break;
@@ -1053,6 +1058,7 @@ void GridFollow()
 
   if (grid_turnState !=0 && grid_turnAngle == 0)
   {
+    grid_status = grid_status & 0x08;
     grid_turnState = 0;
     doMove(0, 0);
   }
