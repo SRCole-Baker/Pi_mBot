@@ -352,13 +352,6 @@ void sendFloatData(float value){
 void sendFloat(float value){ 
      writeSerial(2);
      sendFloatData(value);
-     /*
-     val.floatVal = value;
-     writeSerial(val.byteVal[0]);
-     writeSerial(val.byteVal[1]);
-     writeSerial(val.byteVal[2]);
-     writeSerial(val.byteVal[3]);
-     */
 }
 void sendShortData(double value){     
      valShort.shortVal = value;
@@ -370,13 +363,6 @@ void sendShortData(double value){
 void sendShort(double value){
      writeSerial(3);
      sendShortData(value);
-     /*
-     valShort.shortVal = value;
-     writeSerial(valShort.byteVal[0]);
-     writeSerial(valShort.byteVal[1]);
-     writeSerial(valShort.byteVal[2]);
-     writeSerial(valShort.byteVal[3]);
-     */
 }
 void sendDouble(double value){
      writeSerial(5);
@@ -444,14 +430,6 @@ void runModule(int device){
     break;
     case JOYSTICK:{
       doMove(readShort(6) * -1, readShort(8));
-      /*
-     int leftSpeed = readShort(6);
-     dc.reset(M1);
-     dc.run(leftSpeed);
-     int rightSpeed = readShort(8);
-     dc.reset(M2);
-     dc.run(rightSpeed);
-     */
     }
     break;
    case RGBLED:{
@@ -605,12 +583,12 @@ void runModule(int device){
     break;
     case GRID_TRAVEL:{
       grid_travelDist = readShort(6);
-      grid_status = grid_status | 0xFB;
+      grid_status = grid_status | 0x01;
     }
     break;
     case GRID_TURN:{
       grid_turnAngle = readShort(6);
-      grid_status = grid_status | 0xF3;   
+      grid_status = grid_status | 0x01;   
     }
     break;
   }
@@ -855,20 +833,24 @@ void readSensor(int device){
     case GRID_TRAVEL:{
       sendShort(grid_travelDist);
     }
+    break;
     case GRID_TURN:{
       sendShort(grid_turnAngle);
     }
+    break;
     case GRID_STATUS:{
       sendShort(grid_status);
     }
+    break;
     case GRID_DATA:{
       writeSerial(6);   // Data type 6 - arbitrary length byte array
-      writeSerial(10);  // Length of following data 
+      writeSerial(16);  // Length of following data 
       sendShortData(readLineFollower(2) & grid_status * 4);
       sendFloatData(readUltrasonicSensor(3));
       sendShortData(grid_travelDist);
       sendShortData(grid_turnAngle);
     }
+    break;
   }
 }
 
@@ -924,7 +906,7 @@ void GridFollow()
       if (grid_turnState == 0 && grid_travelDist > 0)
       {
         doMove(travelSpeed, travelSpeed);
-        grid_status = grid_status & 0x01;
+        grid_status = grid_status | 0x01;
         grid_travelState = 1;
       }
       break;
@@ -980,8 +962,7 @@ void GridFollow()
       grid_travelState = 0;      
   }
   if (grid_travelState !=0 && (grid_travelDist == 0 || ultrasonic < 4))
-  {
-    grid_status = grid_status & 0x02;
+  { 
     grid_travelState = 0;
     doMove(0, 0);
   }
@@ -994,13 +975,13 @@ void GridFollow()
       {
         if (grid_turnAngle > 0)
         {
-          grid_status = grid_status & 0x04;
+          grid_status = grid_status | 0x01;
           grid_turnState = 1;
         }
         if (grid_turnAngle < 0)
         {
           grid_turnState = 3;
-          grid_status = grid_status & 0x04;
+          grid_status = grid_status | 0x01;
         }
       }
       break;
@@ -1056,11 +1037,15 @@ void GridFollow()
   
   }
 
-  if (grid_turnState !=0 && grid_turnAngle == 0)
+  if (grid_turnState != 0 && grid_turnAngle == 0)
   {
-    grid_status = grid_status & 0x08;
     grid_turnState = 0;
     doMove(0, 0);
   }
+
+  if (grid_travelState == 0 && grid_turnState == 0)
+  {
+    grid_status = grid_status & 0xFE;
+  }  
 }
 

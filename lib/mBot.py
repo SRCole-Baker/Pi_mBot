@@ -8,6 +8,14 @@ import threading
 import Queue
 #import hid
 
+def readFloat(buffer, position):
+   v = [buffer[position], buffer[position+1], buffer[position+2], buffer[position+3]]
+   return struct.unpack('<f', struct.pack('4B', *v))[0]
+
+def readShort(buffer, position):
+    v = [buffer[position], buffer[position+1]]
+    return struct.unpack('<h', struct.pack('2B', *v))[0]
+
 class mSerial():
     ser = None
     def __init__(self):
@@ -124,6 +132,30 @@ class device:
     def flagReqFailed(self):
         self.readPending = False
         self.writePending = False
+
+class gridData(device):
+
+    # Need to pass reference to other devices that we want to update values of?
+    def __init__(self, name):
+        device.__init__(self, name)
+        
+    def updateValue(self, value):
+        #self.value = value
+
+    # def readFloat(self, position):
+   #    v = [self.buffer[position], self.buffer[position+1],self.buffer[position+2],self.buffer[position+3]]
+   #    return struct.unpack('<f', struct.pack('4B', *v))[0]
+
+   # def readShort(self, position):
+   #     v = [self.buffer[position], self.buffer[position+1]]
+   #     return struct.unpack('<h', struct.pack('2B', *v))[0]
+
+        
+        
+        print value
+        if self.callback is not None:
+            self.callback()
+            
         
 class request:
     def __init__(self, device, pack):
@@ -134,12 +166,17 @@ class mBot():
     def __init__(self):
         print "init mBot"
         signal.signal(signal.SIGINT, self.exit)
+
+        self.rxState = 0        
   
         self.buffer = []
         self.bufferIndex = 0
         self.isParseStart = False
         self.exiting = False
-        self.isParseStartIndex = 0
+        self.msgStartIndex = 0        
+        self.extID = -1
+        self.valType = -1
+        self.dataLen = 0        
         # Wanted to use Priority queue to give priority to writes, but doesn't work -
         # - Seems to prioritise on request itself instead of priority value
         #self.reqQueue = Queue.PriorityQueue()
@@ -169,7 +206,7 @@ class mBot():
         self.gridTravel = device("gridTravel")
         self.gridTurn = device("gridTurn")
         self.gridStatus = device("gridStatus")
-        self.gridData = device("gridData")
+        self.gridData = gridData("gridData")
         
         print "Done Init"        
         
@@ -252,54 +289,95 @@ class mBot():
         
         position = 0
         value = 0   
-        self.buffer+=[byte]
+        self.buffer += [byte]
         bufferLength = len(self.buffer)
-        if bufferLength >= 2:
-            if (self.buffer[bufferLength-1]==0x55 and self.buffer[bufferLength-2]==0xff):
+
+        # State 1: look for start of message characters
+        if self.rxState == 0 and bufferLength >= 2:
+            
+            if (self.buffer[bufferLength-1] == 0x55 and self.buffer[bufferLength-2] == 0xff):
                 self.isParseStart = True
-                self.isParseStartIndex = bufferLength-2 
-            if (self.buffer[bufferLength-1]==0xa and self.buffer[bufferLength-2]==0xd and self.isParseStart==True):         
-                self.isParseStart = False
+                self.msgStartIndex = bufferLength - 2
 
-                #self.__printBuffer("Rxed Data:", self.buffer)
+                self.rxState = 1
 
-                if bufferLength > 4:
-                    position = self.isParseStartIndex + 2
-                    extID = self.buffer[position]
-                    position += 1
-                    valType = self.buffer[position]
-                    position += 1
-                    # 1 byte 2 float 3 short 4 len+string 5 double
-                    if valType == 1:
-                        value = self.buffer[position]
-                    if valType == 2:
-                        value = self.readFloat(position)
-                        if(value < -255 or value > 1023):
-                            value = 0
-                    if valType == 3:
-                        value = self.readShort(position)
-                    if valType == 4:
-                        value = self.readString(position)
-                    if valType == 5:
-                        value = self.readDouble(position)
-                    if valType <= 5:
-                        self.currentRequest.device.updateValue(value)
+        # State 2: read extID, valType, and following character (which will be length of following data for string/file types)
+        # At this point we know how many following bytes to expect in the remainder of the message
+        if self.rxState == 1:
+            if self.readInProgress:
+                if bufferLength - self.msgStartIndex >= 5:
+
+                    self.extID = self.buffer[self.msgStartIndex + 2]
+                    self.valType = self.buffer[self.msgStartIndex + 3]  
+                        
+                    if self.valType == 1:
+                        self.dataLen = 2
+                
+                    if self.valType == 2 or self.valType == 3 or self.valType == 5:
+                        self.dataLen = 4
+                
+                    if self.valType == 4 or self.valType == 6:
+                        self.dataLen = self.buffer[self.msgStartIndex + 4] + 1
+
+                    self.rxState = 2
+            else:
+                # Response to a write - no data, just header and terminator
+                if bufferLength - self.msgStartIndex >= 4:
+                    if self.buffer[self.msgStartIndex + self.dataLen + 2] == 0xa and self.buffer[self.msgStartIndex + self.dataLen + 3] == 0xd:
+                        self.currentRequest.device.flagWriteDone()                        
                     else:
-                        print "Unknown data type " + str(valType)
-                    
-                if self.writeInProgress:
-                    self.currentRequest.device.flagWriteDone()
+                        self.currentRequest.device.flagReqFailed()
+
                     self.writeInProgress = False
+                    self.buffer = []
+                    self.rxState = 0
 
-                if self.readInProgress:
-                    self.currentRequest.device.flagReadDone()
-                    self.readInProgress = False
+        if self.rxState == 2 and bufferLength - self.msgStartIndex >= self.dataLen + 6:
 
-                self.buffer = []
+            if self.buffer[self.msgStartIndex + self.dataLen + 4] == 0xd and self.buffer[self.msgStartIndex + self.dataLen + 5] == 0xa:
+                # 1 byte 2 float 3 short 4 len+string 5 double 6 len+byte file
+                if self.valType == 1:
+                    value = self.buffer[self.msgStartIndex + 4]
+                
+                if self.valType == 2:
+                    value = self.readFloat(self.msgStartIndex + 4)
+                    if(value < -255 or value > 1023):
+                        value = 0
+                
+                if self.valType == 3:
+                    value = self.readShort(self.msgStartIndex + 4)
+                
+                if self.valType == 4:
+                    value = self.readString(self.msgStartIndex + 4)
 
-                # Short delay after a request completes before we start the next one, so we don't
-                # overload arduino comms 
-                sleep(0.1)
+                if self.valType == 5:
+                    value = self.readDouble(self.msgStartIndex + 4)
+
+                if self.valType == 6:
+                    value = self.readByteFile(self.msgStartIndex + 4)
+
+                if self.valType <= 6:
+                    self.currentRequest.device.updateValue(value)
+                else:
+                    print "Unknown data type " + str(self.valType)
+
+                self.currentRequest.device.flagReadDone()                    
+                
+            else:
+                
+                self.__printBuffer("Tx Data:", self.currentRequest.txBuffer)           
+                self.__printBuffer("Rx Data:", self.buffer)
+                
+                print "Bad message format - no terminator found"
+                self.currentRequest.device.flagReqFailed()
+                
+            self.readInProgress = False  
+            self.buffer = []
+            self.rxState = 0
+
+            # Short delay after a request completes before we start the next one, so we don't
+            # overload arduino comms 
+            sleep(0.1)
 
     def readFloat(self, position):
         v = [self.buffer[position], self.buffer[position+1],self.buffer[position+2],self.buffer[position+3]]
@@ -311,12 +389,19 @@ class mBot():
         l = self.buffer[position]
         position+=1
         s = ""
-        for i in Range(l):
+        for i in range(l):
             s += self.buffer[position+i].charAt(0)
         return s
     def readDouble(self, position):
         v = [self.buffer[position], self.buffer[position+1],self.buffer[position+2],self.buffer[position+3]]
         return struct.unpack('<f', struct.pack('4B', *v))[0]
+    def readByteFile(self, position):
+        l = self.buffer[position]
+        position += 1       
+        byteArray = []
+        for i in range(l):            
+            byteArray += [self.buffer[position+i]]           
+        return byteArray
 
     def float2bytes(self,fval):
         val = struct.pack("f",fval)
@@ -430,7 +515,7 @@ class mBot():
 
     def requestGridData(self, callback = None):
         extID = 0
-        return self.__queueReadRequest(self.gridData, bytearray([0xff, 0x55, 0x3, extID, 0x1, 0xce]), callback)    
+        return self.__queueReadRequest(self.gridData, bytearray([0xff, 0x55, 0x3, extID, 0x1, 0xce]), callback)
 
     def doGridX(self, x):
         self.__queueWriteRequest(self.gridX, bytearray([0xff, 0x55, 0x5, 0x0, 0x2, 0xc8] + self.short2bytes(x)))

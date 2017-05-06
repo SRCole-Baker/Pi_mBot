@@ -48,6 +48,9 @@ def setTurn(newTurn):
 def setUltrasonic(newUltrasonic):
     global ultrasonic
     ultrasonic = newUltrasonic
+
+def onRxGridData():
+    pass
     
 bot = mBot()
 try:
@@ -134,10 +137,13 @@ while running:
     bot.requestGridHeading(setHeading)
     #bot.requestLineFollower(2, setHeading)
     #print "updating turn/travel..."            
-    bot.requestGridTurn(setTurn)
-    bot.requestGridTravel(setTravel)
+#    bot.requestGridTurn(setTurn)
+#    bot.requestGridTravel(setTravel)
     #print "updating ultrasonic..."            
-    bot.requestUltrasonicSensor(3, setUltrasonic)
+#    bot.requestUltrasonicSensor(3, setUltrasonic)
+
+    bot.requestGridData(onRxGridData)
+
 
     displaySurf.blit(background, (0, 0))
 
@@ -166,7 +172,6 @@ while running:
     displaySurf.blit(text, textpos)
 
     pygame.display.flip()
-
            
 pygame.display.quit()
 pygame.quit()
