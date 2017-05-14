@@ -844,11 +844,12 @@ void readSensor(int device){
     break;
     case GRID_DATA:{
       writeSerial(6);   // Data type 6 - arbitrary length byte array
-      writeSerial(16);  // Length of following data 
-      sendShortData(readLineFollower(2) & grid_status * 4);
+      writeSerial(20);  // Length of following data 
+      sendShortData(readLineFollower(2) | (grid_status * 4));
       sendFloatData(readUltrasonicSensor(3));
-      sendShortData(grid_travelDist);
-      sendShortData(grid_turnAngle);
+      sendShortData(grid_x);
+      sendShortData(grid_y);
+      sendShortData(grid_heading);
     }
     break;
   }
@@ -873,9 +874,7 @@ void LineFollow(int lineFollower, int travelSpeed, int courseCorrectSpeed)
 }
 
 void GridFollow()
-{
-
-  //!! TODO - implement grid_status
+{  
   int travelSpeed = 100;
   int courseCorrectSpeed = 50;
   int turnSpeed = 90;
@@ -899,14 +898,16 @@ void GridFollow()
   if (grid_travelState > 0){
     ultrasonic = readUltrasonicSensor(3);
   }
-  
+   
   switch(grid_travelState)
   {
-    case 0: // Idle
+    case 0: // Idle      
+      
       if (grid_turnState == 0 && grid_travelDist > 0)
-      {
-        doMove(travelSpeed, travelSpeed);
+      {        
+        ultrasonic = readUltrasonicSensor(3);
         grid_status = grid_status | 0x01;
+        doMove(travelSpeed, travelSpeed);
         grid_travelState = 1;
       }
       break;
@@ -919,7 +920,6 @@ void GridFollow()
       break;
       
     case 2: // Follow line
-
       LineFollow(lineFollower, travelSpeed, courseCorrectSpeed);
 
       if (lineFollower == 3) // Both sensors off the line - found junction
@@ -939,7 +939,6 @@ void GridFollow()
       break;
       
     case 4: // Position over centre of intersection
-
       LineFollow(lineFollower, travelSpeed, courseCorrectSpeed);
       
       if (millis() - grid_timer > 450)
@@ -953,17 +952,17 @@ void GridFollow()
         else
         {
           grid_travelState = 2;
-        }
-        
+        }        
       }
       break;
       
     default:
       grid_travelState = 0;      
   }
-  if (grid_travelState !=0 && (grid_travelDist == 0 || ultrasonic < 4))
+  if (grid_travelState != 0 && (grid_travelDist == 0 || ultrasonic < 4))
   { 
     grid_travelState = 0;
+    grid_travelDist = 0;
     doMove(0, 0);
   }
   

@@ -119,7 +119,9 @@ class device:
         self.writePending = False
 
     def updateValue(self, value):
-        self.value = value
+        # If there's a write pending, discard received value as there's a new value about to overwrite it
+        if not self.writePending:
+            self.value = value
         if self.callback is not None:
             self.callback(value)
 
@@ -133,34 +135,60 @@ class device:
         self.readPending = False
         self.writePending = False
 
-class gridData(device):
+    def cancelCurrentReq(self,  bot):
+        if bot.currentRequest.device == self:
+           bot.currentRequest.cancel = True        
 
-    # Need to pass reference to other devices that we want to update values of?
+class gridStatus(device):
+
     def __init__(self, name):
         device.__init__(self, name)
+        self.lineSenseLeft = False;
+        self.lineSenseRight = False;
+        self.busy = False;
+    
+    def updateValue(self, value):
+
+        if (value & 1) == 0:
+            self.lineSenseRight = False
+        else:
+            self.lineSenseRight = True
+
+        if (value & 2) == 0:
+            self.lineSenseLeft = False
+        else:
+            self.lineSenseLeft = True       
+
+        if (value & 4) == 0:
+            self.busy = False
+        else:
+            self.busy = True
+            
+class gridData(device):
+
+    def __init__(self, name, botRef):
+        device.__init__(self, name)
+        self.bot = botRef
         
     def updateValue(self, value):
-        #self.value = value
-
-    # def readFloat(self, position):
-   #    v = [self.buffer[position], self.buffer[position+1],self.buffer[position+2],self.buffer[position+3]]
-   #    return struct.unpack('<f', struct.pack('4B', *v))[0]
-
-   # def readShort(self, position):
-   #     v = [self.buffer[position], self.buffer[position+1]]
-   #     return struct.unpack('<h', struct.pack('2B', *v))[0]
-
+        status = readShort(value, 0)
+       
+        self.bot.gridStatus.updateValue(status)
+        self.bot.lineFollower.updateValue(status & 3)
         
-        
-        print value
+        self.bot.ultrasonicSensor.value = readFloat(value, 4)
+        self.bot.gridX.value = readShort(value, 8)
+        self.bot.gridY.value = readShort(value, 12)
+        self.bot.gridHeading.value = readShort(value, 16)
+       
         if self.callback is not None:
-            self.callback()
-            
+            self.callback()            
         
 class request:
     def __init__(self, device, pack):
         self.device = device
-        self.txBuffer = pack    
+        self.txBuffer = pack
+        self.cancel = False
         
 class mBot():
     def __init__(self):
@@ -205,8 +233,8 @@ class mBot():
         self.gridHeading = device("gridHeading")
         self.gridTravel = device("gridTravel")
         self.gridTurn = device("gridTurn")
-        self.gridStatus = device("gridStatus")
-        self.gridData = gridData("gridData")
+        self.gridStatus = gridStatus("gridStatus")
+        self.gridData = gridData("gridData", self)
         
         print "Done Init"        
         
@@ -254,7 +282,7 @@ class mBot():
                     
                     self.currentRequest.device.flagReqFailed()
                     self.readInProgress = False
-                    self.writeInProgress = False                 
+                    self.writeInProgress = False
             else:
                 try:                    
                     self.currentRequest = self.writeReqQueue.get(False)
@@ -320,10 +348,10 @@ class mBot():
                         self.dataLen = self.buffer[self.msgStartIndex + 4] + 1
 
                     self.rxState = 2
-            else:
+            else:                
                 # Response to a write - no data, just header and terminator
                 if bufferLength - self.msgStartIndex >= 4:
-                    if self.buffer[self.msgStartIndex + self.dataLen + 2] == 0xa and self.buffer[self.msgStartIndex + self.dataLen + 3] == 0xd:
+                    if self.buffer[self.msgStartIndex + 2] == 0xa and self.buffer[self.msgStartIndex + 3] == 0xd:
                         self.currentRequest.device.flagWriteDone()                        
                     else:
                         self.currentRequest.device.flagReqFailed()
@@ -356,7 +384,7 @@ class mBot():
                 if self.valType == 6:
                     value = self.readByteFile(self.msgStartIndex + 4)
 
-                if self.valType <= 6:
+                if self.valType <= 6 and not self.currentRequest.cancel:
                     self.currentRequest.device.updateValue(value)
                 else:
                     print "Unknown data type " + str(self.valType)

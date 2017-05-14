@@ -2,6 +2,7 @@ from lib.mBot import *
 import os, sys
 import pygame
 from pygame.locals import *
+import navigator
 
 #             R    G    B
 WHITE     = (255, 255, 255)
@@ -86,6 +87,10 @@ bot.doGridX(123)
 bot.doGridY(456)
 bot.doGridHeading(90)
 
+commandThread = threading.Thread(target=navigator.navigator, args=(bot,))
+commandThread.start()
+#navigator.navigator()
+
 while running:
 
     for event in pygame.event.get():
@@ -96,32 +101,41 @@ while running:
             if event.key == K_ESCAPE:
                 running = False
             if event.key == K_UP:
-                speed = 100
-                turn = 0
 
                 tgtTravel = tgtTravel + GRID_SPACE
-                bot.doGridTravel(tgtTravel)
-                tgtTravel = bot.requestGridTravel()
+                bot.doGridTravel(GRID_SPACE)
+                 #tgtTravel = bot.requestGridTravel()
                 
             if event.key == K_DOWN:
-
+                
+                navigator.doSquare()
+                
                 tgtTravel = tgtTravel - GRID_SPACE
                 if tgtTravel < 0:
                     tgtTravel = 0                
-                bot.doGridTravel(tgtTravel)
-                tgtTravel = bot.requestGridTravel()
+                bot.doGridTravel(0)
+                #tgtTravel = bot.requestGridTravel()
                 
             if event.key == K_RIGHT:
                 
-                tgtTurn = tgtTurn + 90
+                tgtTurn = bot.gridTurn.value + 90
                 bot.doGridTurn(tgtTurn)
-                tgtTurn = bot.requestGridTurn()
+                #tgtTurn = bot.requestGridTurn()
                 
             if event.key == K_LEFT:
                 
-                tgtTurn = tgtTurn - 90
+                tgtTurn = bot.gridTurn.value - 90
                 bot.doGridTurn(tgtTurn)
-                tgtTurn = bot.requestGridTurn()
+                #tgtTurn = bot.requestGridTurn()
+                
+            if event.key == K_F1:
+                navigator.doSquare()                
+                
+            if event.key == K_SPACE:
+                navigator.stop()
+                
+                bot.doGridTurn(0)
+                bot.doGridTravel(0)            
                         
         elif event.type == KEYUP:
             pass
@@ -132,9 +146,9 @@ while running:
             pass 
  
     #print "updating pos/heading..."            
-    bot.requestGridX(setX)
-    bot.requestGridY(setY)
-    bot.requestGridHeading(setHeading)
+#    bot.requestGridX(setX)
+#    bot.requestGridY(setY)
+#    bot.requestGridHeading(setHeading)
     #bot.requestLineFollower(2, setHeading)
     #print "updating turn/travel..."            
 #    bot.requestGridTurn(setTurn)
@@ -144,35 +158,37 @@ while running:
 
     bot.requestGridData(onRxGridData)
 
+    #print bot.gridStatus.ready
 
     displaySurf.blit(background, (0, 0))
 
-    text = readoutFont.render("X : " + str(x), 1, TXTCOLOR)
+    text = readoutFont.render("X : " + str(bot.gridX.value), 1, TXTCOLOR)
     textpos = (50,50,0,0)
     displaySurf.blit(text, textpos)
 
-    text = readoutFont.render("Y : " + str(y), 1, TXTCOLOR)
+    text = readoutFont.render("Y : " + str(bot.gridY.value), 1, TXTCOLOR)
     textpos = (50,100,0,0)
     displaySurf.blit(text, textpos)
 
-    text = readoutFont.render("Heading : " + str(heading), 1, TXTCOLOR)
+    text = readoutFont.render("Heading : " + str(bot.gridHeading.value), 1, TXTCOLOR)
     textpos = (50,150,0,0)
     displaySurf.blit(text, textpos)
 
-    text = readoutFont.render("Target Travel Distance : " + str(tgtTravel), 1, TXTCOLOR)
+    text = readoutFont.render("Target Travel Distance : " + str(bot.gridTravel.value), 1, TXTCOLOR)
     textpos = (50,200,0,0)
     displaySurf.blit(text, textpos)
 
-    text = readoutFont.render("Target Turn Angle : " + str(tgtTurn), 1, TXTCOLOR)
+    text = readoutFont.render("Busy Flag : " + str(bot.gridStatus.busy), 1, TXTCOLOR)
     textpos = (50,250,0,0)
     displaySurf.blit(text, textpos)
 
-    text = readoutFont.render("Ultrasonic Distance : " + str(ultrasonic), 1, TXTCOLOR)
+    text = readoutFont.render("Ultrasonic Distance : " + str(bot.ultrasonicSensor.value), 1, TXTCOLOR)
     textpos = (50,300,0,0)
     displaySurf.blit(text, textpos)
 
     pygame.display.flip()
-           
+
+navigator.quit()           
 pygame.display.quit()
 pygame.quit()
 bot.exit()
