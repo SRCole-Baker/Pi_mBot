@@ -308,8 +308,8 @@ class mBot():
                     sleep(0.01)
                 else:   
                     sleep(0.5)
-            except Exception,ex:
-                print str(ex)
+            except Exception as ex:
+                print (str(ex))
                 self.close()
                 sleep(1)
 
@@ -387,7 +387,7 @@ class mBot():
                 if self.valType <= 6 and not self.currentRequest.cancel:
                     self.currentRequest.device.updateValue(value)
                 else:
-                    print "Unknown data type " + str(self.valType)
+                    print ("Unknown data type " + str(self.valType))
 
                 self.currentRequest.device.flagReadDone()                    
                 
@@ -396,7 +396,7 @@ class mBot():
                 self.__printBuffer("Tx Data:", self.currentRequest.txBuffer)           
                 self.__printBuffer("Rx Data:", self.buffer)
                 
-                print "Bad message format - no terminator found"
+                print ("Bad message format - no terminator found")
                 self.currentRequest.device.flagReqFailed()
                 
             self.readInProgress = False  
@@ -465,7 +465,7 @@ class mBot():
     def __printBuffer(self, msg, buf):        
         for i in range(0, len(buf)):
             msg = msg + "  " + str(buf[i])           
-        print msg   
+        print (msg)
 
     def doRGBLed(self, port, slot, index, red, green, blue):
         self.__queueWriteRequest(self.rgbLed, bytearray([0xff, 0x55, 0x9, 0x0, 0x2, 0x8, port, slot, index, red, green, blue]))

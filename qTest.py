@@ -22,4 +22,4 @@ reqQueue.put((1, newReq))
 
 while reqQueue.qsize() > 0:
     currentRequest = reqQueue.get()[1]
-    print currentRequest.device
+    print (currentRequest.device)
