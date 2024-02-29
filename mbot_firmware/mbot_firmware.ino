@@ -45,6 +45,20 @@ int grid_turnState;
 int grid_status;
 
 long unsigned int grid_timer;
+long unsigned int grid_moveStartTime;
+long unsigned int grid_lastMoveTime;
+
+int grid_moveStart_x;
+int grid_moveStart_y;
+int grid_moveStart_heading;
+
+/* RGB Data Transmitter */
+ 
+char RGB_TXByte;      
+int RGB_LastBitCounter;
+long unsigned int RGB_ByteStartTime;
+#define RGB_BIT_LENGTH  50
+
 
 /**********************/
 
@@ -133,6 +147,9 @@ uint8_t command_index = 0;
 #define GRID_TURN 204
 #define GRID_STATUS 205
 #define GRID_DATA 206
+#define GRID_AUX 207
+
+#define RGB_DATATX 250
 
 #define GET 1
 #define RUN 2
@@ -180,7 +197,8 @@ void setup(){
   ledMx.setBrightness(6);
   ledMx.setColorIndex(1);
 }
-int irDelay = 0;
+
+int irDelay = 0;  
 int irIndex = 0;
 char irRead = 0;
 boolean irReady = false;
@@ -250,6 +268,7 @@ void loop(){
   }
 
   GridFollow();
+  RGB_DataTx();
   
 }
 void buzzerOn(){
@@ -583,12 +602,28 @@ void runModule(int device){
     break;
     case GRID_TRAVEL:{
       grid_travelDist = readShort(6);
+      // Set 'In Progress' flag
       grid_status = grid_status | 0x01;
+      // Clear 'Blocked' flag
+      grid_status = grid_status & 0xFD;
     }
     break;
     case GRID_TURN:{
       grid_turnAngle = readShort(6);
-      grid_status = grid_status | 0x01;   
+      // Set 'In Progress' flag
+      grid_status = grid_status | 0x01;
+      // Clear 'Blocked' flag
+      grid_status = grid_status & 0xFD;  
+    }
+    break;
+
+    case RGB_DATATX:{
+      if(RGB_LastBitCounter >= 5)
+      {
+        RGB_TXByte = (char)readBuffer(9);
+        RGB_LastBitCounter = -1;     
+        RGB_ByteStartTime = millis();     
+      }
     }
     break;
   }
@@ -842,6 +877,7 @@ void readSensor(int device){
       sendShort(grid_status);
     }
     break;
+    // GRID_DATA - a block of useful real-time data combined in a single request for comms efficiency
     case GRID_DATA:{
       writeSerial(6);   // Data type 6 - arbitrary length byte array
       writeSerial(20);  // Length of following data 
@@ -852,7 +888,27 @@ void readSensor(int device){
       sendShortData(grid_heading);
     }
     break;
+    // GRID_AUX - a block of aux data, e.g. move execution times, settings, etc
+    case GRID_AUX:{
+      writeSerial(6);   // Data type 6 - arbitrary length byte array
+      writeSerial(40);  // Length of following data 
+      sendShortData(grid_lastMoveTime);
+      sendShortData(0);
+      sendShortData(0);
+      sendShortData(0);
+      sendShortData(0);
+      sendShortData(0);
+      sendShortData(0);
+      sendShortData(0);
+      sendShortData(0);
+      sendShortData(0);
+    }
   }
+}
+
+int SnapValue(int value, int valueStep)
+{
+  return value - ((value+valueStep/2) % valueStep) + valueStep/2;
 }
 
 void LineFollow(int lineFollower, int travelSpeed, int courseCorrectSpeed)
@@ -875,11 +931,17 @@ void LineFollow(int lineFollower, int travelSpeed, int courseCorrectSpeed)
 
 void GridFollow()
 {  
-  int travelSpeed = 100;
-  int courseCorrectSpeed = 50;
-  int turnSpeed = 90;
+  int travelSpeed = 120;
+  int courseCorrectSpeed = 80;
+  int turnSpeed = 80;
   int gridSpace = 300;
   
+  int travelAccelTime = 84;      // Extra ms taken to travel due to acceleration from standing start
+  int turnAccelTime = 33;        // Extra ms taken to turn due to acceleration from standing start
+  float travelmmms = 0.20699172; // mm/ms when traveling at constant speed
+  float turndegms = 0.10391943;  // Degrees/ms when turning at constant speed
+
+ 
   int lineFollower;
   float ultrasonic;
 
@@ -897,6 +959,11 @@ void GridFollow()
   lineFollower = generalDevice.dRead1()*2+generalDevice.dRead2();
   if (grid_travelState > 0){
     ultrasonic = readUltrasonicSensor(3);
+    // Check for object in front of us
+    if (ultrasonic < 3) 
+    {
+      grid_status = grid_status | 0x02;
+    }
   }
    
   switch(grid_travelState)
@@ -909,6 +976,9 @@ void GridFollow()
         grid_status = grid_status | 0x01;
         doMove(travelSpeed, travelSpeed);
         grid_travelState = 1;
+        grid_moveStartTime = millis();
+        grid_moveStart_x = grid_x;
+        grid_moveStart_y = grid_y;
       }
       break;
       
@@ -922,7 +992,7 @@ void GridFollow()
     case 2: // Follow line
       LineFollow(lineFollower, travelSpeed, courseCorrectSpeed);
 
-      if (lineFollower == 3) // Both sensors off the line - found junction
+      if (lineFollower == 3 && calcDistance(grid_moveStart_x, grid_moveStart_y, grid_x, grid_y) > 180) // Both sensors off the line - found junction
       {
           doMove(travelSpeed, travelSpeed);
 
@@ -931,7 +1001,7 @@ void GridFollow()
       break;
       
     case 3: // Cross intersection
-      if (lineFollower != 3)
+      if (lineFollower != 3 || calcDistance(grid_moveStart_x, grid_moveStart_y, grid_x, grid_y) > 240)
       {        
         grid_timer = millis();
         grid_travelState = 4;
@@ -941,11 +1011,31 @@ void GridFollow()
     case 4: // Position over centre of intersection
       LineFollow(lineFollower, travelSpeed, courseCorrectSpeed);
       
-      if (millis() - grid_timer > 450)
+      if (millis() - grid_timer > 300)
       {
-
+        // Update distance remaining to travel
         grid_travelDist = grid_travelDist - gridSpace;
-        if (grid_travelDist <= 0 || ultrasonic < gridSpace / 2) 
+
+        // Sync our position to this junction
+        grid_x = SnapValue(grid_x, gridSpace);
+        grid_y = SnapValue(grid_y, gridSpace);
+  
+        // Adjust starting time / location to junction we've just reached
+        // -> if we're continuing for another square code below will assume 
+        // a standing start from this junction when updating location
+        grid_moveStartTime = millis() - travelAccelTime;
+        grid_moveStart_x = grid_x;
+        grid_moveStart_y = grid_y;
+
+        // Check if there's an object less than half a grid space in front. 
+        // /20 because ultrasonic is in cm & gridSpace is in mm
+        if (ultrasonic < gridSpace / 20 && grid_travelDist > 0) 
+        {
+          grid_status = grid_status | 0x02;
+        }
+        
+        // Stop if we've traveled target distance, or path through next square is blocked
+        if (grid_travelDist <= 0 || grid_status & 0x02) 
         {
           grid_travelDist = 0;
         }
@@ -959,13 +1049,26 @@ void GridFollow()
     default:
       grid_travelState = 0;      
   }
-  if (grid_travelState != 0 && (grid_travelDist == 0 || ultrasonic < 4))
+
+  // If remaining distance is 0 or we're blocked, end movement
+  if (grid_travelState != 0 && (grid_travelDist == 0 || grid_status & 0x02))
   { 
+    grid_lastMoveTime = millis() - grid_moveStartTime;
     grid_travelState = 0;
     grid_travelDist = 0;
     doMove(0, 0);
   }
-  
+
+  if (grid_travelState != 0)
+  {
+    grid_lastMoveTime = millis() - grid_moveStartTime;
+    if (grid_lastMoveTime > travelAccelTime)
+    { 
+      // sin and cos use angle in radians     
+      grid_x = grid_moveStart_x + sin(grid_heading * 0.017453) * (grid_lastMoveTime - travelAccelTime) * travelmmms;
+      grid_y = grid_moveStart_y + cos(grid_heading * 0.017453) * (grid_lastMoveTime - travelAccelTime) * travelmmms;
+    }
+  }
 
   switch(grid_turnState)
   {
@@ -974,11 +1077,15 @@ void GridFollow()
       {
         if (grid_turnAngle > 0)
         {
+          grid_moveStartTime = millis();
+          grid_moveStart_heading = grid_heading;
           grid_status = grid_status | 0x01;
           grid_turnState = 1;
         }
         if (grid_turnAngle < 0)
         {
+          grid_moveStartTime = millis();
+          grid_moveStart_heading = grid_heading;
           grid_turnState = 3;
           grid_status = grid_status | 0x01;
         }
@@ -998,12 +1105,20 @@ void GridFollow()
       if (lineFollower != 3)
       {
         grid_turnAngle = grid_turnAngle - 90;
+        //grid_heading = grid_heading + 90;
+        grid_heading = SnapValue(grid_heading, 90);
+        if (grid_heading >= 360) grid_heading = grid_heading - 360;
         if (grid_turnAngle <= 0)
         {
           grid_turnAngle = 0;
         }
         else
         {
+          // Adjust starting time / angle to position we've just reached
+          // -> if we're continuing for another 90 degrees code below will assume 
+          // a standing start from this point when updating angle
+          grid_moveStartTime = millis() - turnAccelTime;
+          grid_moveStart_heading = grid_heading;        
           grid_turnState = 1;
         }
       }
@@ -1021,12 +1136,20 @@ void GridFollow()
       if (lineFollower != 3)
       {
         grid_turnAngle = grid_turnAngle + 90;
+        //grid_heading = grid_heading - 90;
+        grid_heading = SnapValue(grid_heading, 90);
+        if (grid_heading < 0) grid_heading = grid_heading + 360;
         if (grid_turnAngle >= 0)
         {
           grid_turnAngle = 0;
         }
         else
         {
+          // Adjust starting time / angle to position we've just reached
+          // -> if we're continuing for another 90 degrees code below will assume 
+          // a standing start from this point when updating angle
+          grid_moveStartTime = millis() - turnAccelTime;
+          grid_moveStart_heading = grid_heading; 
           grid_turnState = 3;
         }
       }
@@ -1038,8 +1161,18 @@ void GridFollow()
 
   if (grid_turnState != 0 && grid_turnAngle == 0)
   {
+    grid_lastMoveTime = millis() - grid_moveStartTime;
     grid_turnState = 0;
     doMove(0, 0);
+  }
+
+  if (grid_turnState != 0)
+  {
+    grid_lastMoveTime = millis() - grid_moveStartTime;
+    if (grid_lastMoveTime > turnAccelTime)
+    {
+      grid_heading = grid_moveStart_heading + (grid_lastMoveTime - turnAccelTime) * turndegms;      
+    }
   }
 
   if (grid_travelState == 0 && grid_turnState == 0)
@@ -1048,3 +1181,57 @@ void GridFollow()
   }  
 }
 
+int calcDistance(int x1, int y1, int x2, int y2) {
+  return int(sqrt(pow(float((x2-x1)),2) + pow(float((y2-y1)),2)));
+}
+
+void RGB_DataTx()
+{  
+  int RGB_BitCounter;
+  
+  if (RGB_LastBitCounter < 5)
+  {
+    RGB_BitCounter = (millis() - RGB_ByteStartTime) / RGB_BIT_LENGTH;
+    if (RGB_BitCounter != RGB_LastBitCounter)
+    {
+      //led.reset(port,slot);
+      led.reset(7,2);
+      if (RGB_BitCounter == 0) {
+        // Start bit - all on
+        led.setColorAt(0,255,255,255); 
+        led.show();
+        
+      } else if (RGB_BitCounter >= 5){
+        // Stop bit - all off
+        led.setColorAt(0,0,0,0); 
+        led.show();        
+      } else {
+        switch(RGB_TXByte & 0X03)
+        {
+          case 0:
+            led.setColorAt(0,255,0,0); 
+            led.show();
+            break;
+
+          case 1:
+            led.setColorAt(0,0,255,0); 
+            led.show();
+            break;
+
+          case 2:
+            led.setColorAt(0,0,0,100); 
+            led.show();
+            break;
+          
+          case 3:
+            led.setColorAt(0,255,0,100); 
+            led.show();
+            break;        
+        }
+        RGB_TXByte = RGB_TXByte >> 2;
+        
+      }
+    RGB_LastBitCounter = RGB_BitCounter;
+    }
+  }   
+}
